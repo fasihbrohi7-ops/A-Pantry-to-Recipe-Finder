@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PantryCraft — Smart Pantry-to-Recipe Finder</title>
+  <meta name="description" content="Discover delicious recipes with ingredients you already have. No sign-up, zero food waste, instant kitchen inspiration.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🍳</text></svg>">
+</head>
+<body>
+  <div class="ambient-glow glow-1"></div>
+  <div class="ambient-glow glow-2"></div>
+
+  <!-- Header / Nav -->
+  <header class="navbar" id="app-header">
+    <div class="container nav-content">
+      <div class="brand-group" id="brand-logo" role="button" tabindex="0" title="PantryCraft Home">
+        <div class="brand-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 13.8V4a2 2 0 1 1 4 0v9.8"></path>
+            <path d="M14 13.8V4a2 2 0 1 1 4 0v9.8"></path>
+            <path d="M4 10h16"></path>
+            <path d="M4 14c0 4.4 3.6 8 8 8s8-3.6 8-8"></path>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-name">PantryCraft</span>
+          <span class="brand-badge">Recipe Finder</span>
+        </div>
+      </div>
+
+      <nav class="nav-tabs" role="tablist">
+        <button class="nav-tab active" id="tab-search" role="tab" aria-selected="true" aria-controls="view-search">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <span>Find Recipes</span>
+        </button>
+
+        <button class="nav-tab" id="tab-favorites" role="tab" aria-selected="false" aria-controls="view-favorites">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"></path>
+          </svg>
+          <span>Saved Favorites</span>
+          <span class="counter-badge" id="fav-count-badge" style="display: none;">0</span>
+        </button>
+
+        <button class="btn-surprise" id="btn-surprise-me" title="Get a random surprise recipe">
+          <span class="surprise-icon">🎲</span>
+          <span class="surprise-label">Surprise Me</span>
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="container main-content">
+    
+    <!-- SEARCH VIEW -->
+    <section id="view-search" class="tab-view active" role="tabpanel" aria-labelledby="tab-search">
+      
+      <!-- Hero Banner -->
+      <div class="hero-section">
+        <div class="hero-tag">
+          <span class="sparkle">✨</span> Zero food waste · Instant culinary ideas
+        </div>
+        <h1 class="hero-title">Cook what you have.<br><span class="gradient-text">Zero extra grocery trips.</span></h1>
+        <p class="hero-subtitle">
+          Add the ingredients currently sitting in your fridge or pantry. We'll cross-match and rank the most delicious meals you can whip up right now.
+        </p>
+      </div>
+
+      <!-- Ingredient Input Card -->
+      <div class="card pantry-card" id="pantry-builder">
+        <div class="pantry-card-header">
+          <div class="pantry-header-title">
+            <div class="section-icon">🥕</div>
+            <div>
+              <h2>Your Kitchen Pantry</h2>
+              <p class="section-desc">Type an ingredient and press <kbd>Enter</kbd> or click <strong>Add</strong> (1 to 10 ingredients)</p>
+            </div>
+          </div>
+          <div class="tag-counter" id="tag-counter-label">
+            <span id="current-tag-count">0</span> / 10 added
+          </div>
+        </div>
+
+        <!-- Input Bar -->
+        <form class="ingredient-input-form" id="ingredient-form" onsubmit="return false;">
+          <div class="input-wrapper">
+            <span class="input-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+            </span>
+            <input 
+              type="text" 
+              id="ingredient-input" 
+              placeholder="e.g. chicken breast, garlic, rice, tomatoes..." 
+              autocomplete="off"
+              maxlength="40"
+              aria-label="Enter ingredient"
+            />
+            <button type="submit" class="btn btn-secondary" id="btn-add-ingredient">
+              <span>Add</span>
+              <kbd class="key-hint">↵</kbd>
+            </button>
+          </div>
+        </form>
+
+        <!-- Quick Staples Suggestions -->
+        <div class="quick-staples" id="quick-staples-container">
+          <span class="staples-label">Quick Add Staples:</span>
+          <div class="staples-chips" id="staples-list">
+            <button type="button" class="staple-pill" data-name="Chicken">🍗 Chicken</button>
+            <button type="button" class="staple-pill" data-name="Rice">🍚 Rice</button>
+            <button type="button" class="staple-pill" data-name="Garlic">🧄 Garlic</button>
+            <button type="button" class="staple-pill" data-name="Tomato">🍅 Tomato</button>
+            <button type="button" class="staple-pill" data-name="Onion">🧅 Onion</button>
+            <button type="button" class="staple-pill" data-name="Eggs">🥚 Eggs</button>
+            <button type="button" class="staple-pill" data-name="Cheese">🧀 Cheese</button>
+            <button type="button" class="staple-pill" data-name="Pasta">🍝 Pasta</button>
+            <button type="button" class="staple-pill" data-name="Potato">🥔 Potato</button>
+            <button type="button" class="staple-pill" data-name="Lemon">🍋 Lemon</button>
+          </div>
+        </div>
+
+        <!-- Tag Container -->
+        <div class="tag-area" id="tag-container" aria-live="polite">
+          <div class="tag-placeholder" id="tag-placeholder">
+            <span>No ingredients added yet. Pick a quick staple above or type in your ingredients!</span>
+          </div>
+        </div>
+
+        <!-- Action Bar -->
+        <div class="pantry-actions">
+          <button type="button" class="btn btn-ghost" id="btn-clear-tags" style="display: none;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+            <span>Clear All</span>
+          </button>
+
+          <button type="button" class="btn btn-primary" id="btn-search-recipes" disabled>
+            <span class="btn-spinner" id="search-spinner" style="display: none;"></span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <span id="btn-search-text">Find Matching Recipes</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Search Results Area -->
+      <section class="results-section" id="results-section" style="display: none;">
+        <div class="results-header">
+          <div class="results-title-group">
+            <h2 id="results-headline">Matching Recipes</h2>
+            <p class="results-subtext" id="results-subtext">Ranked by highest ingredient overlap</p>
+          </div>
+
+          <div class="results-controls">
+            <!-- Filter Pills -->
+            <div class="filter-pills" id="filter-pills">
+              <button class="pill-btn active" data-filter="all">All (<span id="count-all">0</span>)</button>
+              <button class="pill-btn" data-filter="multi">Multi-Match 🔥 (<span id="count-multi">0</span>)</button>
+            </div>
+
+            <!-- Sort selector -->
+            <div class="sort-wrapper">
+              <label for="sort-select" class="visually-hidden">Sort results</label>
+              <select id="sort-select" class="select-dropdown">
+                <option value="match-desc">Most Matches First</option>
+                <option value="name-asc">Alphabetical (A-Z)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Recipe Cards Grid -->
+        <div class="recipe-grid" id="recipe-grid" aria-live="polite">
+          <!-- Populated by JavaScript -->
+        </div>
+
+        <!-- Results Empty State -->
+        <div class="empty-state" id="results-empty" style="display: none;">
+          <div class="empty-icon">🍳</div>
+          <h3>No matching recipes found</h3>
+          <p id="empty-state-message">We couldn't find recipes matching these exact pantry items. Try removing an ingredient or using simpler staples!</p>
+          <button class="btn btn-secondary" id="btn-try-popular">Try Chicken + Garlic + Rice</button>
+        </div>
+      </section>
+
+      <!-- Skeleton Skeletons for Loading State -->
+      <div class="recipe-grid skeleton-grid" id="loading-skeletons" style="display: none;">
+        <div class="recipe-card skeleton-card"><div class="skeleton-thumb"></div><div class="skeleton-body"><div class="skeleton-line-lg"></div><div class="skeleton-line-sm"></div></div></div>
+        <div class="recipe-card skeleton-card"><div class="skeleton-thumb"></div><div class="skeleton-body"><div class="skeleton-line-lg"></div><div class="skeleton-line-sm"></div></div></div>
+        <div class="recipe-card skeleton-card"><div class="skeleton-thumb"></div><div class="skeleton-body"><div class="skeleton-line-lg"></div><div class="skeleton-line-sm"></div></div></div>
+        <div class="recipe-card skeleton-card"><div class="skeleton-thumb"></div><div class="skeleton-body"><div class="skeleton-line-lg"></div><div class="skeleton-line-sm"></div></div></div>
+        <div class="recipe-card skeleton-card"><div class="skeleton-thumb"></div><div class="skeleton-body"><div class="skeleton-line-lg"></div><div class="skeleton-line-sm"></div></div></div>
+        <div class="recipe-card skeleton-card"><div class="skeleton-thumb"></div><div class="skeleton-body"><div class="skeleton-line-lg"></div><div class="skeleton-line-sm"></div></div></div>
+      </div>
+
+    </section>
+
+    <!-- FAVORITES VIEW -->
+    <section id="view-favorites" class="tab-view" role="tabpanel" aria-labelledby="tab-favorites" style="display: none;">
+      <div class="favorites-header">
+        <div class="favorites-title-wrap">
+          <div class="section-icon">❤️</div>
+          <div>
+            <h1>Saved Recipes</h1>
+            <p class="section-desc">Your personal recipe book — persistent across your cooking sessions.</p>
+          </div>
+        </div>
+        <div class="fav-count-pill" id="fav-count-label">0 recipes saved</div>
+      </div>
+
+      <!-- Favorites Grid -->
+      <div class="recipe-grid" id="favorites-grid">
+        <!-- Populated by JavaScript -->
+      </div>
+
+      <!-- Favorites Empty State -->
+      <div class="empty-state" id="favorites-empty" style="display: none;">
+        <div class="empty-icon">📖</div>
+        <h3>No saved recipes yet</h3>
+        <p>Save delicious meals while browsing your pantry search results. They will appear here whenever you return!</p>
+        <button class="btn btn-primary" id="btn-explore-recipes">
+          <span>Find Recipes Now</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+            <polyline points="12 5 19 12 12 19"></polyline>
+          </svg>
+        </button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Recipe Detail Modal -->
+  <div class="modal-backdrop" id="recipe-modal" aria-hidden="true" role="dialog" aria-modal="true" style="display: none;">
+    <div class="modal-panel" id="modal-panel">
+      
+      <!-- Close Button -->
+      <button class="modal-close-btn" id="modal-close" aria-label="Close recipe details">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+
+      <!-- Modal Spinner -->
+      <div class="modal-loader" id="modal-loader">
+        <div class="spinner-large"></div>
+        <p>Fetching recipe details & culinary steps...</p>
+      </div>
+
+      <!-- Modal Body (Filled dynamically) -->
+      <div class="modal-content" id="modal-content" style="display: none;">
+        
+        <!-- Hero Header -->
+        <div class="modal-hero">
+          <div class="modal-thumb-wrap">
+            <img id="modal-recipe-img" src="" alt="Recipe photo" loading="lazy" />
+          </div>
+          <div class="modal-meta">
+            <div class="modal-badges">
+              <span class="badge badge-category" id="modal-category">Main</span>
+              <span class="badge badge-area" id="modal-area">International</span>
+            </div>
+            <h2 class="modal-title" id="modal-recipe-title">Recipe Title</h2>
+
+            <div class="modal-actions-bar">
+              <button class="btn btn-save-modal" id="modal-btn-favorite">
+                <svg class="heart-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"></path>
+                </svg>
+                <span id="modal-favorite-text">Save to Favorites</span>
+              </button>
+
+              <a href="#" target="_blank" rel="noopener noreferrer" class="btn btn-ghost" id="modal-btn-source" style="display: none;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                  <polyline points="15 3 21 3 21 9"></polyline>
+                  <line x1="10" y1="14" x2="21" y2="3"></line>
+                </svg>
+                <span>Original Source</span>
+              </a>
+
+              <a href="#" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-youtube" id="modal-btn-youtube" style="display: none;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                </svg>
+                <span>Watch Video</span>
+              </a>
+            </div>
+
+            <!-- Tags -->
+            <div class="modal-tags" id="modal-tags-container"></div>
+          </div>
+        </div>
+
+        <!-- Two Column Content: Ingredients & Cooking Instructions -->
+        <div class="modal-split">
+          
+          <!-- Ingredients Column -->
+          <div class="modal-col ingredients-col">
+            <div class="col-header">
+              <span class="col-icon">🥗</span>
+              <h3>Ingredients</h3>
+              <span class="badge-count" id="modal-ingredients-count">0 items</span>
+            </div>
+            <p class="col-tip">Tip: Tap items to check them off as you prep!</p>
+            <ul class="ingredients-list" id="modal-ingredients-list">
+              <!-- Populated by JS -->
+            </ul>
+          </div>
+
+          <!-- Instructions Column -->
+          <div class="modal-col instructions-col">
+            <div class="col-header">
+              <span class="col-icon">👨‍🍳</span>
+              <h3>Preparation Steps</h3>
+            </div>
+            <div class="instructions-body" id="modal-instructions-body">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toast-container" aria-live="polite"></div>
+
+  <!-- Footer -->
+  <footer class="app-footer">
+    <div class="container footer-content">
+      <div class="footer-left">
+        <strong>PantryCraft</strong> · Made for curious home cooks and zero food waste.
+      </div>
+      <div class="footer-right">
+        Powered by <a href="https://www.themealdb.com" target="_blank" rel="noopener">TheMealDB</a> & <a href="https://upstash.com" target="_blank" rel="noopener">Upstash Redis</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
