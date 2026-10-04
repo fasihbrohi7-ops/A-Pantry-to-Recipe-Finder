@@ -44,6 +44,27 @@ LOCAL_FAVORITES_FILE = DATA_DIR / "favorites.json"
 app = Flask(__name__, static_folder=str(PUBLIC_DIR), static_url_path="")
 CORS(app)
 
+# WSGI Middleware to normalize PATH_INFO from Vercel rewrites
+class NormalizePathMiddleware:
+    def __init__(self, wsgi_app):
+        self.wsgi_app = wsgi_app
+
+    def __call__(self, environ, start_response):
+        path = environ.get('PATH_INFO', '')
+        raw_uri = environ.get('HTTP_X_MATCHED_PATH') or environ.get('HTTP_X_FORWARDED_URI') or environ.get('RAW_URI') or environ.get('REQUEST_URI')
+        
+        if path.startswith('/api/index.py'):
+            rem = path[len('/api/index.py'):]
+            environ['PATH_INFO'] = rem if rem.startswith('/') else ('/' + rem)
+        elif path == '/api/index.py' or path == '/api/index' or path == '/':
+            if raw_uri and not raw_uri.startswith('/api/index'):
+                clean_raw = raw_uri.split('?')[0]
+                if clean_raw:
+                    environ['PATH_INFO'] = clean_raw
+        return self.wsgi_app(environ, start_response)
+
+app.wsgi_app = NormalizePathMiddleware(app.wsgi_app)
+
 # Upstash Redis Initialization
 UPSTASH_URL = os.getenv("UPSTASH_REDIS_REST_URL", "").strip()
 UPSTASH_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN", "").strip()
