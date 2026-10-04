@@ -23,8 +23,22 @@ logger = logging.getLogger(__name__)
 # Determine static folder path (../public)
 BASE_DIR = Path(__file__).resolve().parent.parent
 PUBLIC_DIR = BASE_DIR / "public"
-DATA_DIR = BASE_DIR / ".data"
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# Safe storage directory for local development & serverless read-only environments (e.g. Vercel)
+if os.environ.get("VERCEL"):
+    DATA_DIR = Path("/tmp") / ".data"
+else:
+    try:
+        DATA_DIR = BASE_DIR / ".data"
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        DATA_DIR = Path("/tmp") / ".data"
+
+try:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+except Exception as e:
+    logger.warning("Could not create DATA_DIR %s: %s", DATA_DIR, e)
+
 LOCAL_FAVORITES_FILE = DATA_DIR / "favorites.json"
 
 app = Flask(__name__, static_folder=str(PUBLIC_DIR), static_url_path="")
@@ -48,21 +62,22 @@ else:
 
 # Helper storage functions for favorites
 def _load_local_favorites():
-    if not LOCAL_FAVORITES_FILE.exists():
-        return {}
     try:
+        if not LOCAL_FAVORITES_FILE.exists():
+            return {}
         with open(LOCAL_FAVORITES_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
-        logger.error("Error reading local favorites file: %s", e)
+        logger.warning("Error reading local favorites file: %s", e)
         return {}
 
 def _save_local_favorites(data):
     try:
+        LOCAL_FAVORITES_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(LOCAL_FAVORITES_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
     except Exception as e:
-        logger.error("Error writing local favorites file: %s", e)
+        logger.warning("Error writing local favorites file: %s", e)
 
 def get_all_favorites():
     if redis_client:
@@ -136,7 +151,10 @@ def fetch_single_ingredient_meals(ingredient_tag):
         resp = requests.get(url, timeout=REQUEST_TIMEOUT)
         if resp.status_code == 200:
             data = resp.json()
-            return ingredient_tag, (data.get("meals") or [])
+            meals = data.get("meals")
+            if isinstance(meals, list):
+                return ingredient_tag, meals
+            return ingredient_tag, []
         logger.warning("TheMealDB filter returned status %s for '%s'", resp.status_code, ingredient_tag)
         return ingredient_tag, []
     except Exception as e:
@@ -147,25 +165,28 @@ def parse_meal_detail(meal):
     """
     Parse a full meal record from TheMealDB lookup into our standardized schema.
     """
+    if not isinstance(meal, dict):
+        return {}
+
     ingredients = []
     for i in range(1, 21):
-        ing = (meal.get(f"strIngredient{i}") or "").strip()
-        meas = (meal.get(f"strMeasure{i}") or "").strip()
+        ing = str(meal.get(f"strIngredient{i}") or "").strip()
+        meas = str(meal.get(f"strMeasure{i}") or "").strip()
         if ing:
             ingredients.append({"name": ing, "measure": meas})
 
     tags = []
     raw_tags = meal.get("strTags")
-    if raw_tags:
+    if raw_tags and isinstance(raw_tags, str):
         tags = [t.strip() for t in raw_tags.split(",") if t.strip()]
 
     return {
-        "id": meal.get("idMeal"),
-        "name": meal.get("strMeal", "").strip(),
+        "id": str(meal.get("idMeal") or ""),
+        "name": str(meal.get("strMeal") or "").strip(),
         "category": meal.get("strCategory") or "General",
         "area": meal.get("strArea") or "International",
         "thumbnail": meal.get("strMealThumb") or "",
-        "instructions": (meal.get("strInstructions") or "").strip(),
+        "instructions": str(meal.get("strInstructions") or "").strip(),
         "ingredients": ingredients,
         "source_url": meal.get("strSource") or "",
         "youtube_url": meal.get("strYoutube") or "",
@@ -175,6 +196,7 @@ def parse_meal_detail(meal):
 # ----------------- API Endpoints ----------------- #
 
 @app.route("/api/health", methods=["GET"])
+@app.route("/health", methods=["GET"])
 def health_check():
     return jsonify({
         "status": "healthy",
@@ -183,79 +205,95 @@ def health_check():
     })
 
 @app.route("/api/search", methods=["GET"])
+@app.route("/search", methods=["GET"])
 def search_recipes():
-    raw_ingredients = request.args.get("ingredients", "")
-    if not raw_ingredients:
-        return jsonify({"error": "Missing required 'ingredients' query parameter"}), 400
+    try:
+        raw_ingredients = request.args.get("ingredients", "")
+        if not raw_ingredients:
+            return jsonify({"error": "Missing required 'ingredients' query parameter"}), 400
 
-    # Split, strip, filter empty and deduplicate while maintaining case-insensitive uniqueness
-    seen = set()
-    cleaned_ingredients = []
-    for item in raw_ingredients.split(","):
-        trimmed = item.strip()
-        if trimmed and trimmed.lower() not in seen:
-            seen.add(trimmed.lower())
-            cleaned_ingredients.append(trimmed)
+        # Split, strip, filter empty and deduplicate while maintaining case-insensitive uniqueness
+        seen = set()
+        cleaned_ingredients = []
+        for item in raw_ingredients.split(","):
+            trimmed = item.strip()
+            if trimmed and trimmed.lower() not in seen:
+                seen.add(trimmed.lower())
+                cleaned_ingredients.append(trimmed)
 
-    if len(cleaned_ingredients) == 0:
-        return jsonify({"error": "At least 1 valid ingredient is required"}), 400
+        if len(cleaned_ingredients) == 0:
+            return jsonify({"error": "At least 1 valid ingredient is required"}), 400
 
-    if len(cleaned_ingredients) > 10:
-        return jsonify({"error": "Maximum of 10 ingredient tags allowed"}), 400
+        if len(cleaned_ingredients) > 10:
+            return jsonify({"error": "Maximum of 10 ingredient tags allowed"}), 400
 
-    # Query TheMealDB in parallel for all ingredients
-    merged_meals = {}
-    fetch_success = False
+        # Query TheMealDB in parallel for all ingredients
+        merged_meals = {}
+        fetch_success = False
 
-    max_threads = min(len(cleaned_ingredients), 8)
-    with ThreadPoolExecutor(max_workers=max_threads) as executor:
-        future_map = {
-            executor.submit(fetch_single_ingredient_meals, ing): ing
-            for ing in cleaned_ingredients
-        }
-        for future in as_completed(future_map):
-            try:
-                ing_tag, meals = future.result()
-                fetch_success = True
-                for meal in meals:
-                    meal_id = str(meal.get("idMeal"))
-                    if not meal_id:
-                        continue
-                    if meal_id not in merged_meals:
-                        merged_meals[meal_id] = {
-                            "id": meal_id,
-                            "name": meal.get("strMeal", "").strip(),
-                            "thumbnail": meal.get("strMealThumb", ""),
-                            "match_count": 1,
-                            "matched_ingredients": [ing_tag]
-                        }
-                    else:
-                        merged_meals[meal_id]["match_count"] += 1
-                        if ing_tag not in merged_meals[meal_id]["matched_ingredients"]:
-                            merged_meals[meal_id]["matched_ingredients"].append(ing_tag)
-            except Exception as e:
-                logger.error("Ingredient thread execution error: %s", e)
+        max_threads = min(len(cleaned_ingredients), 8)
+        with ThreadPoolExecutor(max_workers=max_threads) as executor:
+            future_map = {
+                executor.submit(fetch_single_ingredient_meals, ing): ing
+                for ing in cleaned_ingredients
+            }
+            for future in as_completed(future_map):
+                try:
+                    ing_tag, meals = future.result()
+                    fetch_success = True
+                    for meal in (meals or []):
+                        if not isinstance(meal, dict):
+                            continue
+                        meal_id = str(meal.get("idMeal") or "").strip()
+                        if not meal_id:
+                            continue
+                        meal_name = str(meal.get("strMeal") or "").strip()
+                        meal_thumb = str(meal.get("strMealThumb") or "").strip()
 
-    if not fetch_success and not merged_meals:
-        return jsonify({"error": "Failed to connect to recipe database"}), 502
+                        if meal_id not in merged_meals:
+                            merged_meals[meal_id] = {
+                                "id": meal_id,
+                                "name": meal_name,
+                                "thumbnail": meal_thumb,
+                                "match_count": 1,
+                                "matched_ingredients": [ing_tag]
+                            }
+                        else:
+                            merged_meals[meal_id]["match_count"] += 1
+                            if ing_tag not in merged_meals[meal_id]["matched_ingredients"]:
+                                merged_meals[meal_id]["matched_ingredients"].append(ing_tag)
+                except Exception as e:
+                    logger.error("Ingredient thread execution error: %s", e)
 
-    # Rank recipes: primary by match_count descending, secondary by name alphabetically
-    sorted_recipes = sorted(
-        merged_meals.values(),
-        key=lambda r: (-r["match_count"], r["name"].lower())
-    )
+        # If no meals found or network issue, return empty recipes cleanly
+        if not merged_meals:
+            return jsonify({
+                "count": 0,
+                "query_ingredients": cleaned_ingredients,
+                "recipes": []
+            }), 200
 
-    top_results = sorted_recipes[:30]
+        # Rank recipes: primary by match_count descending, secondary by name alphabetically
+        sorted_recipes = sorted(
+            merged_meals.values(),
+            key=lambda r: (-r.get("match_count", 1), (r.get("name") or "").lower())
+        )
 
-    return jsonify({
-        "count": len(sorted_recipes),
-        "query_ingredients": cleaned_ingredients,
-        "recipes": top_results
-    })
+        top_results = sorted_recipes[:30]
+
+        return jsonify({
+            "count": len(sorted_recipes),
+            "query_ingredients": cleaned_ingredients,
+            "recipes": top_results
+        })
+    except Exception as err:
+        logger.exception("Unexpected error in search_recipes: %s", err)
+        return jsonify({"error": f"Search error: {str(err)}"}), 500
 
 @app.route("/api/recipe/<recipe_id>", methods=["GET"])
+@app.route("/recipe/<recipe_id>", methods=["GET"])
 def get_recipe_detail(recipe_id):
-    if not recipe_id or not recipe_id.isdigit():
+    if not recipe_id or not str(recipe_id).isdigit():
         return jsonify({"error": "Invalid recipe ID"}), 400
 
     url = f"{THEMEALDB_BASE}/lookup.php?i={recipe_id}"
@@ -278,6 +316,7 @@ def get_recipe_detail(recipe_id):
         return jsonify({"error": "Internal server error"}), 500
 
 @app.route("/api/random", methods=["GET"])
+@app.route("/random", methods=["GET"])
 def get_random_recipe():
     """Bonus stretch endpoint: returns a serendipitous surprise recipe!"""
     url = f"{THEMEALDB_BASE}/random.php"
@@ -298,6 +337,7 @@ def get_random_recipe():
         return jsonify({"error": "Failed to fetch random recipe"}), 500
 
 @app.route("/api/favorites", methods=["GET"])
+@app.route("/favorites", methods=["GET"])
 def list_favorites():
     favorites = get_all_favorites()
     return jsonify({
@@ -306,6 +346,7 @@ def list_favorites():
     })
 
 @app.route("/api/favorites", methods=["POST"])
+@app.route("/favorites", methods=["POST"])
 def add_favorite():
     body = request.get_json(silent=True) or {}
     recipe_id = body.get("id")
@@ -326,6 +367,7 @@ def add_favorite():
     return jsonify(saved), 200
 
 @app.route("/api/favorites/<recipe_id>", methods=["DELETE"])
+@app.route("/favorites/<recipe_id>", methods=["DELETE"])
 def remove_favorite(recipe_id):
     if not recipe_id:
         return jsonify({"error": "Recipe ID is required"}), 400
@@ -347,6 +389,23 @@ def serve_static(filename):
     if target.exists() and target.is_file():
         return send_from_directory(PUBLIC_DIR, filename)
     return send_from_directory(PUBLIC_DIR, "index.html")
+
+# Global Error Handlers (Return JSON for API requests instead of default HTML 500/404)
+@app.errorhandler(404)
+def not_found(e):
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "API route not found"}), 404
+    return send_from_directory(PUBLIC_DIR, "index.html")
+
+@app.errorhandler(500)
+def server_error(e):
+    logger.exception("Flask internal 500 error: %s", e)
+    return jsonify({"error": "Internal server error"}), 500
+
+@app.errorhandler(Exception)
+def unhandled_exception(e):
+    logger.exception("Unhandled server exception: %s", e)
+    return jsonify({"error": str(e)}), 500
 
 # Export for Vercel
 # Vercel's @vercel/python looks for 'app' in api/index.py

@@ -135,9 +135,22 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Ingredient Tag Management
+  // Ingredient Tag Management & Auto-Search Trigger
   // ---------------------------------------------------------------------------
-  function addIngredient(rawName) {
+  let searchDebounceTimer = null;
+  function triggerSearchWithDebounce(delayMs = 250) {
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    if (state.ingredients.length === 0) {
+      state.searchResults = [];
+      DOM.resultsSection.style.display = 'none';
+      return;
+    }
+    searchDebounceTimer = setTimeout(() => {
+      performSearch();
+    }, delayMs);
+  }
+
+  function addIngredient(rawName, autoSearch = true) {
     const name = rawName.trim();
     if (!name) return;
 
@@ -160,18 +173,30 @@
     updateTagUI();
     DOM.ingredientInput.value = '';
     DOM.ingredientInput.focus();
+
+    if (autoSearch) {
+      triggerSearchWithDebounce(150);
+    }
   }
 
   function removeIngredient(index) {
     if (index >= 0 && index < state.ingredients.length) {
       state.ingredients.splice(index, 1);
       updateTagUI();
+      if (state.ingredients.length > 0) {
+        triggerSearchWithDebounce(150);
+      } else {
+        state.searchResults = [];
+        DOM.resultsSection.style.display = 'none';
+      }
     }
   }
 
   function clearAllIngredients() {
     state.ingredients = [];
+    state.searchResults = [];
     updateTagUI();
+    DOM.resultsSection.style.display = 'none';
     DOM.ingredientInput.focus();
   }
 
@@ -223,6 +248,63 @@
   // ---------------------------------------------------------------------------
   // Recipe Search Execution
   // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // Recipe Search Execution & Fallback Engine
+  // ---------------------------------------------------------------------------
+  async function fallbackClientSideSearch(ingredients) {
+    const cleanIngredients = [];
+    const seen = new Set();
+    ingredients.forEach(item => {
+      const trimmed = item.trim();
+      if (trimmed && !seen.has(trimmed.toLowerCase())) {
+        seen.add(trimmed.toLowerCase());
+        cleanIngredients.push(trimmed);
+      }
+    });
+
+    const merged = {};
+    const fetchPromises = cleanIngredients.map(async ing => {
+      const cleanTerm = ing.trim().toLowerCase().replace(/\s+/g, '_');
+      try {
+        const res = await fetch(`https://www.themealdb.com/api/json/v1/1/filter.php?i=${encodeURIComponent(cleanTerm)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const meals = data.meals || [];
+        meals.forEach(m => {
+          if (!m || !m.idMeal) return;
+          const id = String(m.idMeal);
+          if (!merged[id]) {
+            merged[id] = {
+              id: id,
+              name: (m.strMeal || '').trim(),
+              thumbnail: m.strMealThumb || '',
+              match_count: 1,
+              matched_ingredients: [ing]
+            };
+          } else {
+            merged[id].match_count += 1;
+            if (!merged[id].matched_ingredients.includes(ing)) {
+              merged[id].matched_ingredients.push(ing);
+            }
+          }
+        });
+      } catch (e) {
+        console.warn(`Fallback fetch failed for ${ing}:`, e);
+      }
+    });
+
+    await Promise.all(fetchPromises);
+
+    const sorted = Object.values(merged).sort((a, b) => {
+      if (b.match_count !== a.match_count) {
+        return b.match_count - a.match_count;
+      }
+      return (a.name || '').localeCompare(b.name || '');
+    });
+
+    return sorted.slice(0, 30);
+  }
+
   async function performSearch() {
     if (state.ingredients.length === 0 || state.isSearching) return;
 
@@ -241,14 +323,27 @@
 
     try {
       const queryParam = encodeURIComponent(state.ingredients.join(','));
-      const response = await fetch(`/api/search?ingredients=${queryParam}`);
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `HTTP ${response.status}`);
+      let recipes = null;
+
+      // 1. Attempt backend search
+      try {
+        const response = await fetch(`/api/search?ingredients=${queryParam}`);
+        if (response.ok) {
+          const data = await response.json();
+          recipes = data.recipes || [];
+        } else {
+          console.warn(`Backend search returned HTTP ${response.status}. Using direct fallback.`);
+        }
+      } catch (backendErr) {
+        console.warn('Backend search unreachable. Using direct fallback:', backendErr);
       }
 
-      const data = await response.json();
-      state.searchResults = data.recipes || [];
+      // 2. Client-side resilient fallback if backend returned error or is unreachable
+      if (recipes === null) {
+        recipes = await fallbackClientSideSearch(state.ingredients);
+      }
+
+      state.searchResults = recipes;
       renderSearchResults();
     } catch (err) {
       console.error('Search error:', err);
@@ -551,6 +646,34 @@
   // ---------------------------------------------------------------------------
   // Modal Recipe Detail View
   // ---------------------------------------------------------------------------
+  function parseMealDetailClient(meal) {
+    if (!meal) return null;
+    const ingredients = [];
+    for (let i = 1; i <= 20; i++) {
+      const ing = (meal[`strIngredient${i}`] || '').trim();
+      const meas = (meal[`strMeasure${i}`] || '').trim();
+      if (ing) {
+        ingredients.push({ name: ing, measure: meas });
+      }
+    }
+    const tags = meal.strTags
+      ? meal.strTags.split(',').map(t => t.trim()).filter(Boolean)
+      : [];
+
+    return {
+      id: String(meal.idMeal || ''),
+      name: (meal.strMeal || '').trim(),
+      category: meal.strCategory || 'General',
+      area: meal.strArea || 'International',
+      thumbnail: meal.strMealThumb || '',
+      instructions: (meal.strInstructions || '').trim(),
+      ingredients: ingredients,
+      source_url: meal.strSource || '',
+      youtube_url: meal.strYoutube || '',
+      tags: tags
+    };
+  }
+
   async function openRecipeModal(recipeId) {
     DOM.recipeModal.style.display = 'flex';
     DOM.recipeModal.setAttribute('aria-hidden', 'false');
@@ -560,11 +683,30 @@
     DOM.modalContent.style.display = 'none';
 
     try {
-      const resp = await fetch(`/api/recipe/${recipeId}`);
-      if (!resp.ok) {
-        throw new Error(`Failed to load recipe details (${resp.status})`);
+      let recipe = null;
+      try {
+        const resp = await fetch(`/api/recipe/${recipeId}`);
+        if (resp.ok) {
+          recipe = await resp.json();
+        }
+      } catch (beErr) {
+        console.warn('Backend recipe fetch failed, trying direct lookup:', beErr);
       }
-      const recipe = await resp.json();
+
+      if (!recipe) {
+        const directResp = await fetch(`https://www.themealdb.com/api/json/v1/1/lookup.php?i=${recipeId}`);
+        if (directResp.ok) {
+          const data = await directResp.json();
+          if (data.meals && data.meals.length > 0) {
+            recipe = parseMealDetailClient(data.meals[0]);
+          }
+        }
+      }
+
+      if (!recipe) {
+        throw new Error('Recipe not found');
+      }
+
       state.currentModalRecipe = recipe;
       populateModal(recipe);
     } catch (err) {
@@ -584,11 +726,31 @@
 
     try {
       showToast('Finding a chef surprise for you...', '🎲', 2000);
-      const resp = await fetch('/api/random');
-      if (!resp.ok) {
+      let recipe = null;
+
+      try {
+        const resp = await fetch('/api/random');
+        if (resp.ok) {
+          recipe = await resp.json();
+        }
+      } catch (beErr) {
+        console.warn('Backend random fetch failed, trying direct:', beErr);
+      }
+
+      if (!recipe) {
+        const directResp = await fetch('https://www.themealdb.com/api/json/v1/1/random.php');
+        if (directResp.ok) {
+          const data = await directResp.json();
+          if (data.meals && data.meals.length > 0) {
+            recipe = parseMealDetailClient(data.meals[0]);
+          }
+        }
+      }
+
+      if (!recipe) {
         throw new Error('Failed to fetch surprise recipe');
       }
-      const recipe = await resp.json();
+
       state.currentModalRecipe = recipe;
       populateModal(recipe);
     } catch (err) {
@@ -761,12 +923,19 @@
     // Clear All Tags
     DOM.btnClearTags.addEventListener('click', clearAllIngredients);
 
-    // Quick Staples Clicks
+    // Quick Staples Clicks (Toggle add/remove with instant search)
     DOM.staplesList.addEventListener('click', (e) => {
       const stapleBtn = e.target.closest('.staple-pill');
       if (stapleBtn) {
         const stapleName = stapleBtn.dataset.name;
-        addIngredient(stapleName);
+        const index = state.ingredients.findIndex(
+          item => item.toLowerCase() === stapleName.toLowerCase()
+        );
+        if (index >= 0) {
+          removeIngredient(index);
+        } else {
+          addIngredient(stapleName, true);
+        }
       }
     });
 
