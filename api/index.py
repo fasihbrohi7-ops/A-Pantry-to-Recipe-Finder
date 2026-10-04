@@ -50,28 +50,22 @@ class NormalizePathMiddleware:
         self.wsgi_app = wsgi_app
 
     def __call__(self, environ, start_response):
-        path = environ.get('PATH_INFO', '')
-        raw_uri = environ.get('HTTP_X_MATCHED_PATH') or environ.get('HTTP_X_FORWARDED_URI') or environ.get('RAW_URI') or environ.get('REQUEST_URI')
-        
-        if path.startswith('/api/index.py'):
-            rem = path[len('/api/index.py'):]
-            environ['PATH_INFO'] = rem if rem.startswith('/') else ('/' + rem)
-        elif path == '/api/index.py' or path == '/api/index' or path == '/':
-            if raw_uri and not raw_uri.startswith('/api/index'):
-                clean_raw = raw_uri.split('?')[0]
-                if clean_raw:
-                    environ['PATH_INFO'] = clean_raw
+        query = environ.get('QUERY_STRING', '')
+        if '__path' in query:
+            from urllib.parse import parse_qs, urlencode
+            parsed_query = parse_qs(query, keep_blank_values=True)
+            if '__path' in parsed_query:
+                matched_path = parsed_query.pop('__path')[0]
+                clean_path = '/' + matched_path.lstrip('/')
+                if not clean_path.startswith('/api'):
+                    clean_path = '/api' + clean_path
+                environ['PATH_INFO'] = clean_path
+                # Reconstruct clean QUERY_STRING without __path
+                flat_params = [(k, v) for k, vals in parsed_query.items() for v in vals]
+                environ['QUERY_STRING'] = urlencode(flat_params)
         return self.wsgi_app(environ, start_response)
 
 app.wsgi_app = NormalizePathMiddleware(app.wsgi_app)
-
-@app.route("/api/debug-env", methods=["GET"])
-@app.route("/debug-env", methods=["GET"])
-def debug_env():
-    return jsonify({
-        "path": request.path,
-        "environ": {k: str(v) for k, v in request.environ.items() if not k.startswith("wsgi.") and not k.startswith("werkzeug.")}
-    })
 
 # Upstash Redis Initialization
 UPSTASH_URL = os.getenv("UPSTASH_REDIS_REST_URL", "").strip()
