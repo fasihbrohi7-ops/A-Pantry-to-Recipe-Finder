@@ -65,6 +65,14 @@ class NormalizePathMiddleware:
 
 app.wsgi_app = NormalizePathMiddleware(app.wsgi_app)
 
+@app.route("/api/debug-env", methods=["GET"])
+@app.route("/debug-env", methods=["GET"])
+def debug_env():
+    return jsonify({
+        "path": request.path,
+        "environ": {k: str(v) for k, v in request.environ.items() if not k.startswith("wsgi.") and not k.startswith("werkzeug.")}
+    })
+
 # Upstash Redis Initialization
 UPSTASH_URL = os.getenv("UPSTASH_REDIS_REST_URL", "").strip()
 UPSTASH_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN", "").strip()
