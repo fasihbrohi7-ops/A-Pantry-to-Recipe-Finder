@@ -402,31 +402,40 @@ def remove_favorite(recipe_id):
 
 @app.route("/", methods=["GET"])
 def serve_index():
-    return send_from_directory(PUBLIC_DIR, "index.html")
+    index_file = PUBLIC_DIR / "index.html"
+    if index_file.exists():
+        return send_from_directory(PUBLIC_DIR, "index.html")
+    return jsonify({"status": "PantryCraft API Running", "endpoints": ["/api/search", "/api/recipe/<id>", "/api/favorites"]}), 200
 
 @app.route("/<path:filename>", methods=["GET"])
 def serve_static(filename):
     target = PUBLIC_DIR / filename
     if target.exists() and target.is_file():
         return send_from_directory(PUBLIC_DIR, filename)
-    return send_from_directory(PUBLIC_DIR, "index.html")
+    index_file = PUBLIC_DIR / "index.html"
+    if index_file.exists():
+        return send_from_directory(PUBLIC_DIR, "index.html")
+    return jsonify({"error": f"File {filename} not found"}), 404
 
 # Global Error Handlers (Return JSON for API requests instead of default HTML 500/404)
 @app.errorhandler(404)
 def not_found(e):
     if request.path.startswith("/api/"):
-        return jsonify({"error": "API route not found"}), 404
-    return send_from_directory(PUBLIC_DIR, "index.html")
+        return jsonify({"error": "API route not found", "path": request.path}), 404
+    index_file = PUBLIC_DIR / "index.html"
+    if index_file.exists():
+        return send_from_directory(PUBLIC_DIR, "index.html")
+    return jsonify({"error": "Not found", "path": request.path}), 404
 
 @app.errorhandler(500)
 def server_error(e):
     logger.exception("Flask internal 500 error: %s", e)
-    return jsonify({"error": "Internal server error"}), 500
+    return jsonify({"error": str(e), "type": type(e).__name__, "path": request.path}), 500
 
 @app.errorhandler(Exception)
 def unhandled_exception(e):
     logger.exception("Unhandled server exception: %s", e)
-    return jsonify({"error": str(e)}), 500
+    return jsonify({"error": str(e), "type": type(e).__name__, "path": request.path}), 500
 
 # Export for Vercel
 # Vercel's @vercel/python looks for 'app' in api/index.py
