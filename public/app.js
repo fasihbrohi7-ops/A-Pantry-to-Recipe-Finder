@@ -135,22 +135,9 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Ingredient Tag Management & Auto-Search Trigger
+  // Ingredient Tag Management
   // ---------------------------------------------------------------------------
-  let searchDebounceTimer = null;
-  function triggerSearchWithDebounce(delayMs = 250) {
-    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-    if (state.ingredients.length === 0) {
-      state.searchResults = [];
-      DOM.resultsSection.style.display = 'none';
-      return;
-    }
-    searchDebounceTimer = setTimeout(() => {
-      performSearch();
-    }, delayMs);
-  }
-
-  function addIngredient(rawName, autoSearch = true) {
+  function addIngredient(rawName) {
     const name = rawName.trim();
     if (!name) return;
 
@@ -173,19 +160,13 @@
     updateTagUI();
     DOM.ingredientInput.value = '';
     DOM.ingredientInput.focus();
-
-    if (autoSearch) {
-      triggerSearchWithDebounce(150);
-    }
   }
 
   function removeIngredient(index) {
     if (index >= 0 && index < state.ingredients.length) {
       state.ingredients.splice(index, 1);
       updateTagUI();
-      if (state.ingredients.length > 0) {
-        triggerSearchWithDebounce(150);
-      } else {
+      if (state.ingredients.length === 0) {
         state.searchResults = [];
         DOM.resultsSection.style.display = 'none';
       }
@@ -923,7 +904,7 @@
     // Clear All Tags
     DOM.btnClearTags.addEventListener('click', clearAllIngredients);
 
-    // Quick Staples Clicks (Toggle add/remove with instant search)
+    // Quick Staples Clicks (Toggle add/remove selection)
     DOM.staplesList.addEventListener('click', (e) => {
       const stapleBtn = e.target.closest('.staple-pill');
       if (stapleBtn) {
@@ -934,7 +915,7 @@
         if (index >= 0) {
           removeIngredient(index);
         } else {
-          addIngredient(stapleName, true);
+          addIngredient(stapleName);
         }
       }
     });
